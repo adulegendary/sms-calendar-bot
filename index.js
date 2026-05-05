@@ -30,7 +30,7 @@ function getCalendarClient() {
 
   try {
     credentials = process.env.GOOGLE_CREDENTIALS
-      ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
+      ? JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS, "base64").toString())
       : JSON.parse(readFileSync("credentials.json"));
   } catch (e) {
     throw new Error(`GOOGLE_CREDENTIALS parse failed: ${e.message}`);
@@ -38,7 +38,7 @@ function getCalendarClient() {
 
   try {
     token = process.env.GOOGLE_TOKEN
-      ? JSON.parse(process.env.GOOGLE_TOKEN)
+      ? JSON.parse(Buffer.from(process.env.GOOGLE_TOKEN, "base64").toString())
       : JSON.parse(readFileSync("token.json"));
   } catch (e) {
     throw new Error(`GOOGLE_TOKEN parse failed: ${e.message}`);
