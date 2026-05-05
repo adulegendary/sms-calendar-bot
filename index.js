@@ -26,10 +26,16 @@ function saveUsers() {
 }
 
 function getCalendarClient() {
-  const credentials = JSON.parse(readFileSync("credentials.json"));
+  const credentials = process.env.GOOGLE_CREDENTIALS
+    ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
+    : JSON.parse(readFileSync("credentials.json"));
+  const token = process.env.GOOGLE_TOKEN
+    ? JSON.parse(process.env.GOOGLE_TOKEN)
+    : JSON.parse(readFileSync("token.json"));
+
   const { client_id, client_secret } = credentials.installed;
   const oauth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:3000/auth/callback");
-  oauth2Client.setCredentials(JSON.parse(readFileSync("token.json")));
+  oauth2Client.setCredentials(token);
   return google.calendar({ version: "v3", auth: oauth2Client });
 }
 
