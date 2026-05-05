@@ -2,6 +2,7 @@ import express from "express";
 import TelegramBot from "node-telegram-bot-api";
 import Anthropic from "@anthropic-ai/sdk";
 import { google } from "googleapis";
+import { Client as NotionClient } from "@notionhq/client";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import dotenv from "dotenv";
 
@@ -12,8 +13,9 @@ app.use(express.json());
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+const notion = new NotionClient({ auth: process.env.NOTION_API_TOKEN });
 const conversations = {};
-
+// 1966 *
 // Persist known chat IDs so reminders survive restarts
 const USERS_FILE = "users.json";
 const knownChatIds = new Set(existsSync(USERS_FILE) ? JSON.parse(readFileSync(USERS_FILE)) : []);
@@ -95,6 +97,62 @@ async function deleteEvent(eventSummaryOrId) {
   return `Deleted: "${event.summary}"`;
 }
 
+// --- Notion functions ---
+
+async function searchNotion(query) {
+  const res = await notion.search({ query, page_size: 5 });
+  if (!res.results.length) return "No Notion pages found matching that query.";
+  return res.results.map((p) => {
+    const title = p.object === "database"
+      ? p.title?.[0]?.plain_text
+      : p.properties?.title?.title?.[0]?.plain_text || p.properties?.Name?.title?.[0]?.plain_text || "(untitled)";
+    return `[${p.object}] ${title} (id: ${p.id})`;
+  }).join("\n");
+}
+
+async function readNotionPage(pageId) {
+  const [page, blocks] = await Promise.all([
+    notion.pages.retrieve({ page_id: pageId }),
+    notion.blocks.children.list({ block_id: pageId, page_size: 50 }),
+  ]);
+
+  const title = page.properties?.title?.title?.[0]?.plain_text
+    || page.properties?.Name?.title?.[0]?.plain_text
+    || "(untitled)";
+
+  const content = blocks.results.map((b) => {
+    const text = b[b.type]?.rich_text?.map((t) => t.plain_text).join("") || "";
+    if (b.type === "to_do") return `[${b.to_do.checked ? "x" : " "}] ${text}`;
+    if (b.type === "bulleted_list_item") return `• ${text}`;
+    if (b.type === "numbered_list_item") return `- ${text}`;
+    return text;
+  }).filter(Boolean).join("\n");
+
+  return `${title}:\n${content || "(empty page)"}`;
+}
+
+async function addNotionTodo(pageId, text) {
+  await notion.blocks.children.append({
+    block_id: pageId,
+    children: [{
+      type: "to_do",
+      to_do: { rich_text: [{ type: "text", text: { content: text } }], checked: false },
+    }],
+  });
+  return `Added to-do: "${text}"`;
+}
+
+async function appendNotionText(pageId, text) {
+  await notion.blocks.children.append({
+    block_id: pageId,
+    children: [{
+      type: "bulleted_list_item",
+      bulleted_list_item: { rich_text: [{ type: "text", text: { content: text } }] },
+    }],
+  });
+  return `Added to Notion: "${text}"`;
+}
+
 // Tools Claude can call
 const tools = [
   {
@@ -133,29 +191,84 @@ const tools = [
       required: ["eventSummary"],
     },
   },
+  {
+    name: "search_notion",
+    description: "Search the user's Notion workspace for pages or databases by keyword",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search term" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "read_notion_page",
+    description: "Read the content of a Notion page by its ID",
+    input_schema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The Notion page ID" },
+      },
+      required: ["pageId"],
+    },
+  },
+  {
+    name: "add_notion_todo",
+    description: "Add a to-do checkbox item to a Notion page",
+    input_schema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The Notion page ID" },
+        text: { type: "string", description: "The to-do item text" },
+      },
+      required: ["pageId", "text"],
+    },
+  },
+  {
+    name: "append_notion_text",
+    description: "Append a bullet point text item to a Notion page",
+    input_schema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The Notion page ID" },
+        text: { type: "string", description: "The text to append" },
+      },
+      required: ["pageId", "text"],
+    },
+  },
 ];
 
 async function runTool(name, input) {
   if (name === "get_calendar_events") return await getEvents(input.days || 7);
   if (name === "create_calendar_event") return await createEvent(input.summary, input.startDateTime, input.endDateTime, input.description);
   if (name === "delete_calendar_event") return await deleteEvent(input.eventSummary);
+  if (name === "search_notion") return await searchNotion(input.query);
+  if (name === "read_notion_page") return await readNotionPage(input.pageId);
+  if (name === "add_notion_todo") return await addNotionTodo(input.pageId, input.text);
+  if (name === "append_notion_text") return await appendNotionText(input.pageId, input.text);
   return "Unknown tool";
 }
 
-const SYSTEM_PROMPT = `You are a personal calendar assistant on Telegram.
-You help the user manage their Google Calendar — checking schedules, creating events, deleting events, and finding free time.
+const SYSTEM_PROMPT = `You are a personal assistant on Telegram with access to Google Calendar and Notion.
+You help the user manage their schedule and their Notion workspace.
+
+Google Calendar: check schedules, create events, delete events, find free time.
+Notion pages available: Gym Plan Checklist, Student Planner, Student Job Tracker, To Do List, Group Project Planner, Codesignal Prep Checklist, LeetCode Question Tracker, Movie to watch, Canada expense, Total mileage per day.
 
 Commands the user can send:
-/today - show today's events
-/week - show this week's events
-/tomorrow - show tomorrow's events
+/today - today's calendar events
+/tomorrow - tomorrow's events
+/week - this week's events
 /reset - clear conversation history
 /help - list commands
 
 Rules:
 - Keep replies concise and friendly, plain text no markdown
-- Always use get_calendar_events before answering questions about the user's schedule
-- When creating or deleting events, confirm details first unless user says "just do it"
+- Always use get_calendar_events before answering about the user's schedule
+- Use search_notion to find a page, then read_notion_page to read its contents
+- When adding todos or notes to Notion, confirm which page first unless it's obvious
+- When creating or deleting calendar events, confirm details first unless user says "just do it"
 - Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
 
 async function askClaude(chatId, userMessage) {
