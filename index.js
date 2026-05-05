@@ -468,9 +468,23 @@ app.get("/", (_, res) => res.send("Telegram Calendar Bot is running!"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+
+  const required = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "PUBLIC_URL"];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(`Missing required env vars: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+
   const webhookUrl = `${process.env.PUBLIC_URL}/telegram/${process.env.TELEGRAM_BOT_TOKEN}`;
-  await bot.setWebHook(webhookUrl);
-  console.log(`Telegram webhook set to: ${webhookUrl}`);
+  try {
+    await bot.setWebHook(webhookUrl);
+    console.log(`Telegram webhook set to: ${webhookUrl}`);
+  } catch (err) {
+    console.error("Failed to set webhook:", err.message);
+    process.exit(1);
+  }
+
   setInterval(checkReminders, 60 * 1000);
   console.log("Reminder checker started (every 60s)");
 });
