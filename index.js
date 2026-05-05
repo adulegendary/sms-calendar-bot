@@ -153,6 +153,31 @@ async function appendNotionText(pageId, text) {
   return `Added to Notion: "${text}"`;
 }
 
+async function findBlockByText(pageId, searchText) {
+  const res = await notion.blocks.children.list({ block_id: pageId, page_size: 100 });
+  const lower = searchText.toLowerCase();
+  return res.results.find((b) => {
+    const richText = b[b.type]?.rich_text || [];
+    const blockText = richText.map((t) => t.plain_text).join("").toLowerCase();
+    return blockText.includes(lower);
+  });
+}
+
+async function deleteNotionBlock(pageId, searchText) {
+  const block = await findBlockByText(pageId, searchText);
+  if (!block) return `Could not find "${searchText}" on that page.`;
+  await notion.blocks.delete({ block_id: block.id });
+  return `Deleted: "${searchText}"`;
+}
+
+async function uncheckNotionTodo(pageId, searchText) {
+  const block = await findBlockByText(pageId, searchText);
+  if (!block) return `Could not find "${searchText}" on that page.`;
+  if (block.type !== "to_do") return `"${searchText}" is not a to-do item.`;
+  await notion.blocks.update({ block_id: block.id, to_do: { checked: false } });
+  return `Unchecked: "${searchText}"`;
+}
+
 // Tools Claude can call
 const tools = [
   {
@@ -237,6 +262,30 @@ const tools = [
       required: ["pageId", "text"],
     },
   },
+  {
+    name: "delete_notion_block",
+    description: "Delete an item from a Notion page by searching its text",
+    input_schema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The Notion page ID" },
+        searchText: { type: "string", description: "Text of the item to delete" },
+      },
+      required: ["pageId", "searchText"],
+    },
+  },
+  {
+    name: "uncheck_notion_todo",
+    description: "Uncheck a to-do checkbox item on a Notion page",
+    input_schema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The Notion page ID" },
+        searchText: { type: "string", description: "Text of the to-do item to uncheck" },
+      },
+      required: ["pageId", "searchText"],
+    },
+  },
 ];
 
 async function runTool(name, input) {
@@ -247,6 +296,8 @@ async function runTool(name, input) {
   if (name === "read_notion_page") return await readNotionPage(input.pageId);
   if (name === "add_notion_todo") return await addNotionTodo(input.pageId, input.text);
   if (name === "append_notion_text") return await appendNotionText(input.pageId, input.text);
+  if (name === "delete_notion_block") return await deleteNotionBlock(input.pageId, input.searchText);
+  if (name === "uncheck_notion_todo") return await uncheckNotionTodo(input.pageId, input.searchText);
   return "Unknown tool";
 }
 
