@@ -26,12 +26,23 @@ function saveUsers() {
 }
 
 function getCalendarClient() {
-  const credentials = process.env.GOOGLE_CREDENTIALS
-    ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
-    : JSON.parse(readFileSync("credentials.json"));
-  const token = process.env.GOOGLE_TOKEN
-    ? JSON.parse(process.env.GOOGLE_TOKEN)
-    : JSON.parse(readFileSync("token.json"));
+  let credentials, token;
+
+  try {
+    credentials = process.env.GOOGLE_CREDENTIALS
+      ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
+      : JSON.parse(readFileSync("credentials.json"));
+  } catch (e) {
+    throw new Error(`GOOGLE_CREDENTIALS parse failed: ${e.message}`);
+  }
+
+  try {
+    token = process.env.GOOGLE_TOKEN
+      ? JSON.parse(process.env.GOOGLE_TOKEN)
+      : JSON.parse(readFileSync("token.json"));
+  } catch (e) {
+    throw new Error(`GOOGLE_TOKEN parse failed: ${e.message}`);
+  }
 
   const { client_id, client_secret } = credentials.installed;
   const oauth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:3000/auth/callback");
