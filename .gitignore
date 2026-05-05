@@ -2,3 +2,6 @@
 node_modules/
 *:Zone.Identifier
 twilio_2FA_recovery_code.txt
+credentials.json
+token.json
+.claude/

@@ -1,50 +1,38 @@
 import express from "express";
-import twilio from "twilio";
+import TelegramBot from "node-telegram-bot-api";
 import Anthropic from "@anthropic-ai/sdk";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
-app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Store conversation history per phone number (in-memory; use Redis/DB for production)
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+
+// Store conversation history per chat ID (in-memory; use Redis/DB for production)
 const conversations = {};
 
-const SYSTEM_PROMPT = `You are a personal calendar assistant that communicates via SMS. 
+const SYSTEM_PROMPT = `You are a personal calendar assistant on Telegram.
 You help the user manage their Google Calendar — checking schedules, creating events, setting reminders, and finding free time.
 
 Rules:
-- Keep replies SHORT and SMS-friendly (under 300 characters when possible)
+- Keep replies concise and friendly
 - Use plain text, no markdown
 - When listing events, use a compact format: "9am Team standup, 2pm Dentist"
 - Always confirm actions before making changes (unless the user says "just do it")
-- If asked for reminders, create a calendar event with a reminder notification
-- Be conversational and friendly
 - Today's date context: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
 
-async function askClaude(phoneNumber, userMessage) {
-  // Initialize conversation history for new users
-  if (!conversations[phoneNumber]) {
-    conversations[phoneNumber] = [];
+async function askClaude(chatId, userMessage) {
+  if (!conversations[chatId]) {
+    conversations[chatId] = [];
   }
 
-  // Add user message to history
-  conversations[phoneNumber].push({
-    role: "user",
-    content: userMessage,
-  });
+  conversations[chatId].push({ role: "user", content: userMessage });
 
-  // Keep last 10 messages to stay within context limits
-  const recentHistory = conversations[phoneNumber].slice(-10);
+  const recentHistory = conversations[chatId].slice(-10);
 
   try {
     const response = await anthropic.messages.create({
@@ -54,17 +42,12 @@ async function askClaude(phoneNumber, userMessage) {
       messages: recentHistory,
     });
 
-    // Extract text from response
     const assistantMessage = response.content
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("");
 
-    // Add assistant response to history
-    conversations[phoneNumber].push({
-      role: "assistant",
-      content: assistantMessage,
-    });
+    conversations[chatId].push({ role: "assistant", content: assistantMessage });
 
     console.log(`Claude reply: ${assistantMessage}`);
     return assistantMessage;
@@ -74,43 +57,40 @@ async function askClaude(phoneNumber, userMessage) {
   }
 }
 
-// Webhook endpoint Twilio calls when you receive an SMS
-app.post("/sms", async (req, res) => {
-  const incomingMsg = req.body.Body?.trim();
-  const fromNumber = req.body.From;
+// Telegram webhook endpoint
+app.post(`/telegram/${process.env.TELEGRAM_BOT_TOKEN}`, async (req, res) => {
+  res.sendStatus(200);
 
-  console.log(`SMS from ${fromNumber}: ${incomingMsg}`);
+  const update = req.body;
+  const message = update.message;
 
-  if (!incomingMsg || !fromNumber) {
-    return res.status(400).send("Bad request");
-  }
+  if (!message?.text) return;
 
-  // Handle "reset" command to clear conversation history
-  if (incomingMsg.toLowerCase() === "reset") {
-    conversations[fromNumber] = [];
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Conversation reset. How can I help you?");
-    res.type("text/xml").send(twiml.toString());
+  const chatId = message.chat.id;
+  const text = message.text.trim();
+
+  console.log(`Telegram from ${chatId}: ${text}`);
+
+  if (text.toLowerCase() === "/reset") {
+    conversations[chatId] = [];
+    await bot.sendMessage(chatId, "Conversation reset. How can I help you?");
     return;
   }
 
-  // Get Claude's reply
-  const reply = await askClaude(fromNumber, incomingMsg);
-
-  // Send reply via Twilio
-  const twiml = new twilio.twiml.MessagingResponse();
-  twiml.message(reply);
-
-  res.type("text/xml").send(twiml.toString());
+  const reply = await askClaude(chatId, text);
+  await bot.sendMessage(chatId, reply);
 });
 
 // Health check
 app.get("/", (req, res) => {
-  res.send("SMS Calendar Bot is running!");
+  res.send("Telegram Calendar Bot is running!");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Webhook URL: http://localhost:${PORT}/sms`);
+
+  const webhookUrl = `${process.env.PUBLIC_URL}/telegram/${process.env.TELEGRAM_BOT_TOKEN}`;
+  await bot.setWebHook(webhookUrl);
+  console.log(`Telegram webhook set to: ${webhookUrl}`);
 });
