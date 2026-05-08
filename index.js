@@ -79,7 +79,7 @@ async function getEvents(days = 7) {
 
 async function createEvent(summary, startDateTime, endDateTime, description = "") {
   const calendar = getCalendarClient();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tz = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const res = await calendar.events.insert({
     calendarId: "primary",
     resource: {
@@ -337,7 +337,8 @@ Rules:
 - Use search_notion to find a page, then read_notion_page to read its contents
 - When adding todos or notes to Notion, confirm which page first unless it's obvious
 - When creating or deleting calendar events, confirm details first unless user says "just do it"
-- Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`;
+- Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: process.env.USER_TIMEZONE })}
+- The user's timezone is ${process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone}. Always use this timezone when generating ISO 8601 datetimes for calendar events (e.g. 2026-05-06T15:00:00 means 3pm in that timezone, not UTC).`;
 
 async function askClaude(chatId, userMessage) {
   if (!conversations[chatId]) conversations[chatId] = [];
