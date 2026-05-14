@@ -338,8 +338,9 @@ Commands the user can send:
 
 Rules:
 - Keep replies concise and friendly, plain text no markdown
-- Always use get_calendar_events before answering about the user's schedule
-- Use search_notion to find a page, then read_notion_page to read its contents
+- Only call tools when the user explicitly asks for calendar or Notion information — never call tools proactively or speculatively
+- Use get_calendar_events only when the user asks about their schedule, events, or free time
+- Use search_notion and read_notion_page only when the user asks about a Notion page
 - When adding todos or notes to Notion, confirm which page first unless it's obvious
 - When creating or deleting calendar events, confirm details first unless user says "just do it"
 - Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: process.env.USER_TIMEZONE })}
