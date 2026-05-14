@@ -71,10 +71,11 @@ async function getEvents(days = 7) {
 
   const events = res.data.items;
   if (!events || events.length === 0) return "No upcoming events found.";
+  const tz = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
   return events.map((e) => {
     const start = e.start.dateTime || e.start.date;
     const date = new Date(start).toLocaleString("en-US", {
-      weekday: "short", month: "short", day: "numeric",
+      timeZone: tz, weekday: "short", month: "short", day: "numeric",
       hour: "numeric", minute: "2-digit",
     });
     return `${date}: ${e.summary}`;
@@ -410,8 +411,9 @@ async function checkReminders() {
       if (sentReminders.has(key)) continue;
       sentReminders.add(key);
 
+      const tz = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
       const startTime = new Date(event.start.dateTime || event.start.date).toLocaleTimeString("en-US", {
-        hour: "numeric", minute: "2-digit",
+        timeZone: tz, hour: "numeric", minute: "2-digit",
       });
 
       for (const chatId of knownChatIds) {
@@ -460,11 +462,23 @@ app.post(`/telegram/${process.env.TELEGRAM_BOT_TOKEN}`, async (req, res) => {
 
   if (text === "/tomorrow") {
     const calendar = getCalendarClient();
-    const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(0, 0, 0, 0);
-    const end = new Date(start); end.setHours(23, 59, 59);
+    const tz = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    const [y, m, d] = todayStr.split("-").map(Number);
+    const pad = n => String(n).padStart(2, "0");
+    const t = new Date(y, m - 1, d + 1);
+    const tStr = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+    const noon = new Date(`${tStr}T12:00:00Z`);
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+        .formatToParts(noon).filter(x => x.type !== "literal").map(x => [x.type, x.value])
+    );
+    const offsetMs = noon - new Date(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
+    const start = new Date(new Date(`${tStr}T00:00:00Z`).getTime() + offsetMs);
+    const end = new Date(start.getTime() + 86400000 - 1000);
     const res = await calendar.events.list({ calendarId: "primary", timeMin: start.toISOString(), timeMax: end.toISOString(), singleEvents: true, orderBy: "startTime" });
     const items = res.data.items;
-    const reply = items?.length ? items.map((e) => `${new Date(e.start.dateTime || e.start.date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}: ${e.summary}`).join("\n") : "Nothing scheduled tomorrow.";
+    const reply = items?.length ? items.map((e) => `${new Date(e.start.dateTime || e.start.date).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}: ${e.summary}`).join("\n") : "Nothing scheduled tomorrow.";
     await bot.sendMessage(chatId, `Tomorrow:\n${reply}`);
     return;
   }
