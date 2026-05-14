@@ -47,6 +47,10 @@ function getCalendarClient() {
   const { client_id, client_secret } = credentials.installed;
   const oauth2Client = new google.auth.OAuth2(client_id, client_secret, "http://localhost:3000/auth/callback");
   oauth2Client.setCredentials(token);
+  oauth2Client.on("tokens", (newTokens) => {
+    const merged = { ...token, ...newTokens };
+    if (!process.env.GOOGLE_TOKEN) writeFileSync("token.json", JSON.stringify(merged));
+  });
   return google.calendar({ version: "v3", auth: oauth2Client });
 }
 
